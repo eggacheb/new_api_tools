@@ -5,7 +5,7 @@ Handles system overview statistics, usage monitoring, and trend analysis.
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from .database import DatabaseManager, get_db_manager
@@ -268,21 +268,43 @@ class DashboardService:
         if start_time is None:
             start_time = end_time - 86400 * 7  # 7 days ago
 
-        sql = """
-            SELECT
-                model_name,
-                COUNT(*) as request_count,
-                COALESCE(SUM(quota), 0) as quota_used,
-                COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
-                COALESCE(SUM(completion_tokens), 0) as completion_tokens
-            FROM logs
-            WHERE created_at >= :start_time AND created_at <= :end_time
-                AND type = 2
-                AND model_name IS NOT NULL AND model_name != ''
-            GROUP BY model_name
-            ORDER BY request_count DESC
-            LIMIT :limit
-        """
+        # 根据数据库类型选择是否使用 FORCE INDEX
+        from .database import DatabaseEngine
+        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
+        
+        # MySQL 使用 FORCE INDEX 强制使用最优索引，避免优化器选错
+        if is_pg:
+            sql = """
+                SELECT
+                    model_name,
+                    COUNT(*) as request_count,
+                    COALESCE(SUM(quota), 0) as quota_used,
+                    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+                    COALESCE(SUM(completion_tokens), 0) as completion_tokens
+                FROM logs
+                WHERE created_at >= :start_time AND created_at <= :end_time
+                    AND type = 2
+                    AND model_name IS NOT NULL AND model_name != ''
+                GROUP BY model_name
+                ORDER BY request_count DESC
+                LIMIT :limit
+            """
+        else:
+            sql = """
+                SELECT
+                    model_name,
+                    COUNT(*) as request_count,
+                    COALESCE(SUM(quota), 0) as quota_used,
+                    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+                    COALESCE(SUM(completion_tokens), 0) as completion_tokens
+                FROM logs FORCE INDEX (idx_logs_type_time_model)
+                WHERE created_at >= :start_time AND created_at <= :end_time
+                    AND type = 2
+                    AND model_name IS NOT NULL AND model_name != ''
+                GROUP BY model_name
+                ORDER BY request_count DESC
+                LIMIT :limit
+            """
         result = self.db.execute(sql, {
             "start_time": start_time,
             "end_time": end_time,
@@ -366,10 +388,11 @@ class DashboardService:
             )
 
         # Fill in all dates in the range (including days with no data)
+        # 使用 UTC 时区生成日期，与数据库保持一致
         trends = []
         for i in range(days):
             day_ts = start_time + (i * 86400)
-            date_str = datetime.fromtimestamp(day_ts).strftime("%Y-%m-%d")
+            date_str = datetime.fromtimestamp(day_ts, tz=timezone.utc).strftime("%Y-%m-%d")
             if date_str in data_by_date:
                 trends.append(data_by_date[date_str])
             else:
@@ -404,7 +427,7 @@ class DashboardService:
             FROM logs
             WHERE created_at >= :start_time AND created_at <= :end_time
                 AND type = 2
-            GROUP BY FLOOR(created_at / 3600)
+            GROUP BY hour_ts
             ORDER BY hour_ts ASC
         """
         result = self.db.execute(sql, {"start_time": start_time, "end_time": end_time})

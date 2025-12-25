@@ -334,6 +334,14 @@ class DatabaseManager:
             ("idx_logs_user_created", "logs", ["user_id", "created_at"]),  # User analysis queries
             ("idx_logs_type_created", "logs", ["type", "created_at"]),  # Dashboard stats by type
 
+            # Dashboard optimization indexes
+            ("idx_logs_model_created", "logs", ["model_name", "created_at"]),  # Model usage stats
+            ("idx_logs_user_type_created", "logs", ["user_id", "type", "created_at"]),  # Top users query
+            ("idx_logs_type_created_token", "logs", ["type", "created_at", "token_id"]),  # Active tokens query
+            ("idx_logs_type_time_model", "logs", ["type", "created_at", "model_name"]),  # Model distribution query
+            ("idx_logs_type_time_user", "logs", ["type", "created_at", "user_id"]),  # Active users query
+            ("idx_logs_type_time_token", "logs", ["type", "created_at", "token_id"]),  # Active tokens query v2
+
             # IP monitoring indexes (from RECOMMENDED_INDEXES)
             ("idx_logs_ip_created", "logs", ["ip", "created_at"]),  # IP analysis base index
             ("idx_logs_created_ip_token", "logs", ["created_at", "ip", "token_id"]),  # Shared IP detection
