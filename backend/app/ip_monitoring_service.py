@@ -48,19 +48,24 @@ class IPMonitoringService:
                 SELECT
                     COUNT(*) as total_users,
                     SUM(CASE 
-                        WHEN setting::jsonb->>'record_ip_log' = 'true' THEN 1 
+                        WHEN setting IS NOT NULL 
+                             AND setting <> '' 
+                             AND setting::jsonb->>'record_ip_log' = 'true' THEN 1 
                         ELSE 0 
                     END) as enabled_count
                 FROM users
                 WHERE deleted_at IS NULL
             """
         else:
-            # MySQL: use JSON_EXTRACT
+            # MySQL: use JSON_EXTRACT, handle empty string
             sql = """
                 SELECT
                     COUNT(*) as total_users,
                     SUM(CASE 
-                        WHEN JSON_EXTRACT(setting, '$.record_ip_log') = true THEN 1 
+                        WHEN setting IS NOT NULL 
+                             AND setting <> '' 
+                             AND JSON_VALID(setting) 
+                             AND JSON_EXTRACT(setting, '$.record_ip_log') = true THEN 1 
                         ELSE 0 
                     END) as enabled_count
                 FROM users
@@ -392,6 +397,8 @@ class IPMonitoringService:
                     SELECT COUNT(*) as enabled 
                     FROM users 
                     WHERE deleted_at IS NULL 
+                        AND setting IS NOT NULL 
+                        AND setting <> ''
                         AND setting::jsonb->>'record_ip_log' = 'true'
                 """
             else:
@@ -399,6 +406,9 @@ class IPMonitoringService:
                     SELECT COUNT(*) as enabled 
                     FROM users 
                     WHERE deleted_at IS NULL 
+                        AND setting IS NOT NULL 
+                        AND setting <> ''
+                        AND JSON_VALID(setting)
                         AND JSON_EXTRACT(setting, '$.record_ip_log') = true
                 """
             enabled_rows = self.db.execute(enabled_sql, {})
@@ -409,19 +419,29 @@ class IPMonitoringService:
                 # PostgreSQL: use jsonb concatenation
                 update_sql = """
                     UPDATE users 
-                    SET setting = COALESCE(setting::jsonb, '{}'::jsonb) || '{"record_ip_log": true}'::jsonb
+                    SET setting = COALESCE(NULLIF(setting, '')::jsonb, '{}'::jsonb) || '{"record_ip_log": true}'::jsonb
                     WHERE deleted_at IS NULL 
                         AND (setting IS NULL 
+                             OR setting = ''
                              OR setting::jsonb->>'record_ip_log' IS NULL 
                              OR setting::jsonb->>'record_ip_log' <> 'true')
                 """
             else:
-                # MySQL: use JSON_SET
+                # MySQL: use JSON_SET, handle empty string by converting to '{}'
                 update_sql = """
                     UPDATE users 
-                    SET setting = JSON_SET(COALESCE(setting, '{}'), '$.record_ip_log', true)
+                    SET setting = JSON_SET(
+                        CASE 
+                            WHEN setting IS NULL OR setting = '' OR NOT JSON_VALID(setting) 
+                            THEN '{}' 
+                            ELSE setting 
+                        END, 
+                        '$.record_ip_log', true
+                    )
                     WHERE deleted_at IS NULL 
                         AND (setting IS NULL 
+                             OR setting = ''
+                             OR NOT JSON_VALID(setting)
                              OR JSON_EXTRACT(setting, '$.record_ip_log') IS NULL 
                              OR JSON_EXTRACT(setting, '$.record_ip_log') <> true)
                 """

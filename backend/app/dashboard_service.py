@@ -268,43 +268,21 @@ class DashboardService:
         if start_time is None:
             start_time = end_time - 86400 * 7  # 7 days ago
 
-        # 根据数据库类型选择是否使用 FORCE INDEX
-        from .database import DatabaseEngine
-        is_pg = self.db.config.engine == DatabaseEngine.POSTGRESQL
-        
-        # MySQL 使用 FORCE INDEX 强制使用最优索引，避免优化器选错
-        if is_pg:
-            sql = """
-                SELECT
-                    model_name,
-                    COUNT(*) as request_count,
-                    COALESCE(SUM(quota), 0) as quota_used,
-                    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
-                    COALESCE(SUM(completion_tokens), 0) as completion_tokens
-                FROM logs
-                WHERE created_at >= :start_time AND created_at <= :end_time
-                    AND type = 2
-                    AND model_name IS NOT NULL AND model_name != ''
-                GROUP BY model_name
-                ORDER BY request_count DESC
-                LIMIT :limit
-            """
-        else:
-            sql = """
-                SELECT
-                    model_name,
-                    COUNT(*) as request_count,
-                    COALESCE(SUM(quota), 0) as quota_used,
-                    COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
-                    COALESCE(SUM(completion_tokens), 0) as completion_tokens
-                FROM logs FORCE INDEX (idx_logs_type_time_model)
-                WHERE created_at >= :start_time AND created_at <= :end_time
-                    AND type = 2
-                    AND model_name IS NOT NULL AND model_name != ''
-                GROUP BY model_name
-                ORDER BY request_count DESC
-                LIMIT :limit
-            """
+        sql = """
+            SELECT
+                model_name,
+                COUNT(*) as request_count,
+                COALESCE(SUM(quota), 0) as quota_used,
+                COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) as completion_tokens
+            FROM logs
+            WHERE created_at >= :start_time AND created_at <= :end_time
+                AND type = 2
+                AND model_name IS NOT NULL AND model_name != ''
+            GROUP BY model_name
+            ORDER BY request_count DESC
+            LIMIT :limit
+        """
         result = self.db.execute(sql, {
             "start_time": start_time,
             "end_time": end_time,
